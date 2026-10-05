@@ -87,3 +87,34 @@ jobs:
               issue_number: context.issue.number,
               body: '### Terraform Plan\n```\n' + plan + '\n```'
             });
+  deploy:
+    name: Apply & Verify
+    needs: plan
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan
+
+      - run: terraform init
+
+      - name: Apply the reviewed plan
+        run: terraform apply -input=false tfplan
+
+      - name: Verify instance is running
+        run: |
+          ID=$(terraform output -raw instance_id)
+          aws ec2 wait instance-running --instance-ids "$ID"
+          aws ec2 describe-instance-status --instance-ids "$ID" \
+            --query 'InstanceStatuses[0].InstanceState.Name' --output text
